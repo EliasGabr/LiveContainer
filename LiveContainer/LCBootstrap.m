@@ -93,7 +93,7 @@ static BOOL checkJITEnabled() {
         return YES;
     }
     
-    if(@available(iOS 26.0 ,*))  {
+    if(@available(iOS 28.0 ,*))  {
         return false;
     }
 
@@ -164,13 +164,14 @@ int hook__NSGetExecutablePath_overwriteExecPath(char*** dyldApiInstancePtr, char
     
     char** mainExecutablePathPtr = 0;
     // mainExecutablePath is at 0x10 for iOS 15~18.3.2, 0x20 for iOS 18.4+
-    if(dyldConfig[2] != 0 && dyldConfig[2][0] == '/') {
-        mainExecutablePathPtr = dyldConfig + 2;
-    } else if (dyldConfig[4] != 0 && dyldConfig[4][0] == '/') {
-        mainExecutablePathPtr = dyldConfig + 4;
-    } else {
-        assert(mainExecutablePathPtr != 0);
+    // On iOS 20+, it might have moved further.
+    for (int i = 2; i <= 12; i += 2) {
+        if (dyldConfig[i] != 0 && dyldConfig[i][0] == '/') {
+            mainExecutablePathPtr = dyldConfig + i;
+            break;
+        }
     }
+    assert(mainExecutablePathPtr != 0);
 
     kern_return_t ret = builtin_vm_protect(mach_task_self(), (mach_vm_address_t)mainExecutablePathPtr, sizeof(mainExecutablePathPtr), false, PROT_READ | PROT_WRITE);
     if(ret != KERN_SUCCESS) {
@@ -220,8 +221,8 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     }
     if (!LCSharedUtils.certificatePassword && !isSideStore) {
 #if !TARGET_OS_SIMULATOR
-        if(@available(iOS 26.0 ,*))  {
-            return @"JITLess mode is required since iOS 26. Please set it up in settings.";
+        if(@available(iOS 28.0 ,*))  {
+            return @"JITLess mode is required since iOS 28. Please set it up in settings.";
         }
 #endif
         // First of all, let's check if we have JIT

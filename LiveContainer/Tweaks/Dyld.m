@@ -214,12 +214,15 @@ bool performHookDyldApi(const char* functionName, uint32_t adrpOffset, void** or
      00000001ac934c90         ldr        x2, [x8, #0x258]
      00000001ac934c94         br         x2
      */
-    uint32_t* adrpInstPtr = baseAddr + adrpOffset;
-    if ((*adrpInstPtr & 0x9f000000) != 0x90000000) {
-        adrpOffset += 20;
-        adrpInstPtr = baseAddr + adrpOffset;
+    uint32_t* adrpInstPtr = NULL;
+    for (int i = 0; i < 32; i++) {
+        if ((baseAddr[i] & 0x9f000000) == 0x90000000) {
+            adrpInstPtr = baseAddr + i;
+            adrpOffset = i;
+            break;
+        }
     }
-    assert ((*adrpInstPtr & 0x9f000000) == 0x90000000);
+    assert(adrpInstPtr != 0);
     void* gdyldPtr = (void*)aarch64_emulate_adrp_ldr(*adrpInstPtr, *(baseAddr + adrpOffset + 1), (uint64_t)(baseAddr + adrpOffset));
     
     assert(gdyldPtr != 0);
@@ -227,7 +230,15 @@ bool performHookDyldApi(const char* functionName, uint32_t adrpOffset, void** or
     void* vtablePtr = **(void***)gdyldPtr;
     
     void* vtableFunctionPtr = 0;
-    uint32_t* movInstPtr = baseAddr + adrpOffset + 6;
+    uint32_t* movInstPtr = NULL;
+    for (int i = 1; i < 16; i++) {
+        uint32_t *instPtr = baseAddr + adrpOffset + i;
+        if((*instPtr & 0x7F800000) == 0x52800000 || (*instPtr & 0xFFE00C00) == 0xF8400C00 || (*instPtr & 0xBFC00000) == 0xB9400000) {
+            movInstPtr = instPtr;
+            break;
+        }
+    }
+    assert(movInstPtr != 0);
 
     if((*movInstPtr & 0x7F800000) == 0x52800000) {
         // arm64e, mov imm + add + ldr
@@ -239,7 +250,7 @@ bool performHookDyldApi(const char* functionName, uint32_t adrpOffset, void** or
         vtableFunctionPtr = vtablePtr + imm9;
     } else {
         // arm64
-        uint32_t* ldrInstPtr2 = baseAddr + adrpOffset + 3;
+        uint32_t* ldrInstPtr2 = movInstPtr;
         assert((*ldrInstPtr2 & 0xBFC00000) == 0xB9400000);
         uint32_t size2 = (*ldrInstPtr2 & 0xC0000000) >> 30;
         uint32_t imm12_2 = (*ldrInstPtr2 & 0x3FFC00) >> 10;
