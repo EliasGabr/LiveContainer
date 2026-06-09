@@ -190,8 +190,9 @@ bool performHookDyldApi(const char* functionName, uint32_t adrpOffset, void** or
     assert(baseAddr != 0);
 
     uint32_t* adrpInstPtr = NULL;
-    // Scan for adrp
+    // Scan for adrp safely
     for (int i = 0; i < 128; i++) {
+        if (!LCAddressRangeIsReadable(&baseAddr[i], sizeof(uint32_t))) break;
         if ((baseAddr[i] & 0x9f000000) == 0x90000000) {
             adrpInstPtr = &baseAddr[i];
             adrpOffset = i;
@@ -205,42 +206,48 @@ bool performHookDyldApi(const char* functionName, uint32_t adrpOffset, void** or
     assert(gdyldPtr != 0);
     // Strip PAC
     gdyldPtr = (void*)((uintptr_t)gdyldPtr & 0x0000007fffffffff);
-    assert(*(void**)gdyldPtr != 0);
-    void* vtablePtr = **(void***)gdyldPtr;
+    
+    void* vtablePtr = LCReadPointer(gdyldPtr);
+    assert(vtablePtr != 0);
     vtablePtr = (void*)((uintptr_t)vtablePtr & 0x0000007fffffffff);
     
     void* vtableFunctionPtr = 0;
-    uint32_t* movInstPtr = baseAddr + adrpOffset + 6;
-
-    if((*movInstPtr & 0x7F800000) == 0x52800000) {
-        // arm64e, mov imm + add + ldr
-        uint32_t imm16 = (*movInstPtr & 0x1FFFE0) >> 5;
-        vtableFunctionPtr = vtablePtr + imm16;
-    } else if ((*movInstPtr & 0xFFE00C00) == 0xF8400C00) {
-        // arm64e, ldr immediate Pre-index 64bit
-        uint32_t imm9 = (*movInstPtr & 0x1FF000) >> 12;
-        vtableFunctionPtr = vtablePtr + imm9;
-    } else {
-        // arm64
-        uint32_t* ldrInstPtr2 = baseAddr + adrpOffset + 3;
-        assert((*ldrInstPtr2 & 0xBFC00000) == 0xB9400000);
-        uint32_t size2 = (*ldrInstPtr2 & 0xC0000000) >> 30;
-        uint32_t imm12_2 = (*ldrInstPtr2 & 0x3FFC00) >> 10;
-        vtableFunctionPtr = vtablePtr + (imm12_2 << size2);
+    // Scan for instructions that calculate vtableFunctionPtr from vtablePtr
+    for (int i = adrpOffset + 2; i < adrpOffset + 12; i++) {
+        uint32_t insn = baseAddr[i];
+        uint32_t rt, rn, rm, rd, imm16, hw, opcode, imm12;
+        if (aarch64_decode_mov_wide(insn, &rd, &imm16, &hw, &opcode)) {
+            // MOVZ rd, #imm16, LSL #(hw*16)
+            if (opcode == 2) { // MOVZ
+                vtableFunctionPtr = (void*)((uintptr_t)vtablePtr + (imm16 << (hw * 16)));
+                break;
+            }
+        } else if (aarch64_decode_ldr_unsigned_imm(insn, &rt, &rn, &imm12)) {
+             vtableFunctionPtr = (void*)((uintptr_t)vtablePtr + (imm12 << 3));
+             break;
+        } else if ((insn & 0xFFE00C00) == 0xF8400C00) {
+             // ldr immediate Pre-index 64bit
+             int32_t imm9 = ((int32_t)(insn << 11)) >> 23;
+             vtableFunctionPtr = (void*)((uintptr_t)vtablePtr + imm9);
+             break;
+        }
     }
+    assert(vtableFunctionPtr != NULL);
 
     
     kern_return_t ret = builtin_vm_protect(mach_task_self(), (mach_vm_address_t)vtableFunctionPtr, sizeof(uintptr_t), false, PROT_READ | PROT_WRITE | VM_PROT_COPY);
     if(ret != KERN_SUCCESS) {
-        assert(os_tpro_is_supported());
-        os_thread_self_restrict_tpro_to_rw();
+        if (os_tpro_is_supported()) {
+            os_thread_self_restrict_tpro_to_rw();
+        }
     }
     *origFunction = (void*)*(void**)vtableFunctionPtr;
     *(uint64_t*)vtableFunctionPtr = (uint64_t)hookFunction;
     builtin_vm_protect(mach_task_self(), (mach_vm_address_t)vtableFunctionPtr, sizeof(uintptr_t), false, PROT_READ);
     if(ret != KERN_SUCCESS) {
-        assert(os_tpro_is_supported());
-        os_thread_self_restrict_tpro_to_ro();
+        if (os_tpro_is_supported()) {
+            os_thread_self_restrict_tpro_to_ro();
+        }
     }
     return true;
 }

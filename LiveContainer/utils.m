@@ -128,6 +128,59 @@ uint64_t aarch64_emulate_adrp_ldr(uint32_t instruction, uint32_t ldrInstruction,
     return adrp_target + (uint64_t) imm12;
 }
 
+bool LCAddressRangeIsReadable(void *addr, size_t size) {
+    mach_vm_address_t address = (mach_vm_address_t)addr;
+    mach_vm_size_t vmsize;
+    mach_msg_type_number_t count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
+    vm_region_submap_short_info_data_64_t info;
+    natural_t depth = 0;
+    while (address < (mach_vm_address_t)addr + size) {
+        kern_return_t kr = vm_region_recurse_64(mach_task_self(), &address, &vmsize, &depth, (vm_region_info_t)&info, &count);
+        if (kr != KERN_SUCCESS) return false;
+        if (address > (mach_vm_address_t)addr) return false;
+        if (!(info.protection & VM_PROT_READ)) return false;
+        address += vmsize;
+    }
+    return true;
+}
+
+void* LCReadPointer(void *addr) {
+    if (!LCAddressRangeIsReadable(addr, sizeof(void*))) {
+        return NULL;
+    }
+    return *(void**)addr;
+}
+
+bool aarch64_decode_ldr_unsigned_imm(uint32_t insn, uint32_t *rt, uint32_t *rn, uint32_t *imm12) {
+    if ((insn & 0xFFC00000) != 0xF9400000) {
+        return false;
+    }
+    *rt = insn & 0x1F;
+    *rn = (insn >> 5) & 0x1F;
+    *imm12 = (insn >> 10) & 0xFFF;
+    return true;
+}
+
+bool aarch64_decode_add_reg(uint32_t insn, uint32_t *rd, uint32_t *rn, uint32_t *rm) {
+    if ((insn & 0xFFE00000) != 0x8B000000) {
+        return false;
+    }
+    *rd = insn & 0x1F;
+    *rn = (insn >> 5) & 0x1F;
+    *rm = (insn >> 16) & 0x1F;
+    return true;
+}
+
+bool aarch64_decode_mov_wide(uint32_t insn, uint32_t *rd, uint32_t *imm16, uint32_t *hw, uint32_t *opcode) {
+    if ((insn & 0x1F000000) != 0x12000000) {
+        return false;
+    }
+    *rd = insn & 0x1F;
+    *imm16 = (insn >> 5) & 0xFFFF;
+    *hw = (insn >> 21) & 0x3;
+    *opcode = (insn >> 29) & 0x3;
+    return true;
+}
 
 @implementation NSDictionary(lc)
 

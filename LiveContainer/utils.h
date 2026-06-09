@@ -21,11 +21,17 @@ void init_bypassDyldLibValidation(void);
 kern_return_t builtin_vm_protect(mach_port_name_t task, mach_vm_address_t address, mach_vm_size_t size, boolean_t set_max, vm_prot_t new_prot);
 void *jitless_hook_dlopen(const char *path, int mode);
 
+bool LCAddressRangeIsReadable(void *addr, size_t size);
+void* LCReadPointer(void *addr);
+
 uint64_t aarch64_get_tbnz_jump_address(uint32_t instruction, uint64_t pc);
 uint64_t aarch64_emulate_adrp(uint32_t instruction, uint64_t pc);
 bool aarch64_emulate_add_imm(uint32_t instruction, uint32_t *dst, uint32_t *src, uint32_t *imm);
 uint64_t aarch64_emulate_adrp_add(uint32_t instruction, uint32_t addInstruction, uint64_t pc);
 uint64_t aarch64_emulate_adrp_ldr(uint32_t instruction, uint32_t ldrInstruction, uint64_t pc);
+bool aarch64_decode_ldr_unsigned_imm(uint32_t insn, uint32_t *rt, uint32_t *rn, uint32_t *imm12);
+bool aarch64_decode_add_reg(uint32_t insn, uint32_t *rd, uint32_t *rn, uint32_t *rm);
+bool aarch64_decode_mov_wide(uint32_t insn, uint32_t *rd, uint32_t *imm16, uint32_t *hw, uint32_t *opcode);
 
 @interface NSUserDefaults(LiveContainer)
 + (instancetype)lcUserDefaults;

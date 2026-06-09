@@ -114,18 +114,22 @@ void overwriteMainCFBundle(void) {
     uint32_t *pc = (uint32_t *)CFBundleGetMainBundle;
     void **mainBundleAddr = 0;
     while (true) {
+        if (!LCAddressRangeIsReadable(pc, sizeof(uint32_t))) break;
         uint64_t addr = aarch64_get_tbnz_jump_address(*pc, (uint64_t)pc);
         if (addr) {
             // adrp <- pc-1
             // tbnz <- pc
             // ...
             // ldr  <- addr
-            mainBundleAddr = (void **)aarch64_emulate_adrp_ldr(*(pc-1), *(uint32_t *)addr, (uint64_t)(pc-1));
+            uint32_t adrpInsn = *(pc-1);
+            uint32_t ldrInsn = *(uint32_t *)addr;
+            mainBundleAddr = (void **)aarch64_emulate_adrp_ldr(adrpInsn, ldrInsn, (uint64_t)(pc-1));
             break;
         }
         ++pc;
     }
     assert(mainBundleAddr != NULL);
+    mainBundleAddr = (void **)((uintptr_t)mainBundleAddr & 0x0000007fffffffff);
     *mainBundleAddr = (__bridge void *)NSBundle.mainBundle._cfBundle;
 }
 
@@ -137,15 +141,18 @@ void overwriteMainNSBundle(NSBundle *newBundle) {
     NSString *oldPath = NSBundle.mainBundle.executablePath;
     uint32_t *mainBundleImpl = (uint32_t *)method_getImplementation(class_getClassMethod(NSBundle.class, @selector(mainBundle)));
     for (int i = 0; i < 20; i++) {
+        if (!LCAddressRangeIsReadable(&mainBundleImpl[i], sizeof(uint32_t) * 2)) break;
         void **_MergedGlobals = (void **)aarch64_emulate_adrp_add(mainBundleImpl[i], mainBundleImpl[i+1], (uint64_t)&mainBundleImpl[i]);
         if (!_MergedGlobals) continue;
 
-        // In iOS 17, adrp+add gives _MergedGlobals+4, so it uses ldur instruction instead of ldr
+        // In iOS 17/27, adrp+add gives _MergedGlobals+4, so it uses ldur instruction instead of ldr
+        // Check for LDUR opcode
         if ((mainBundleImpl[i+4] & 0xFF000000) == 0xF8000000) {
             uint64_t ptr = (uint64_t)_MergedGlobals - 4;
             _MergedGlobals = (void **)ptr;
         }
 
+        _MergedGlobals = (void **)((uintptr_t)_MergedGlobals & 0x0000007fffffffff);
         for (int mgIdx = 0; mgIdx < 20; mgIdx++) {
             if (_MergedGlobals[mgIdx] == (__bridge void *)NSBundle.mainBundle) {
                 _MergedGlobals[mgIdx] = (__bridge void *)newBundle;
