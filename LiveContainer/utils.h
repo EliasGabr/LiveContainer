@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #include <mach-o/loader.h>
+#include <mach/mach.h>
 #include <objc/runtime.h>
 #include <os/lock.h>
 #define PrivClass(name) ((Class)objc_lookUpClass(#name))
@@ -14,6 +15,10 @@ void os_unfair_recursive_lock_lock_with_options(void* lock, uint32_t options);
 void os_unfair_recursive_lock_unlock(void* lock);
 bool os_unfair_recursive_lock_trylock(void* lock);
 bool os_unfair_recursive_lock_tryunlock4objc(void* lock);
+
+void os_thread_self_restrict_tpro_to_rw(void);
+void os_thread_self_restrict_tpro_to_ro(void);
+bool os_tpro_is_supported(void);
 
 struct dyld_all_image_infos *_alt_dyld_get_all_image_infos(void);
 void *getDyldBase(void);

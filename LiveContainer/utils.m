@@ -1,4 +1,5 @@
 #import "utils.h"
+#include <mach/mach.h>
 
 void __assert_rtn(const char* func, const char* file, int line, const char* failedexpr) {
     [NSException raise:NSInternalInconsistencyException format:@"Assertion failed: (%s), file %s, line %d.\n", failedexpr, file, line];
@@ -130,14 +131,16 @@ uint64_t aarch64_emulate_adrp_ldr(uint32_t instruction, uint32_t ldrInstruction,
 
 bool LCAddressRangeIsReadable(void *addr, size_t size) {
     mach_vm_address_t address = (mach_vm_address_t)addr;
+    mach_vm_address_t end = address + size;
     mach_vm_size_t vmsize;
     mach_msg_type_number_t count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
     vm_region_submap_short_info_data_64_t info;
     natural_t depth = 0;
-    while (address < (mach_vm_address_t)addr + size) {
+    while (address < end) {
+        mach_vm_address_t curr = address;
         kern_return_t kr = vm_region_recurse_64(mach_task_self(), &address, &vmsize, &depth, (vm_region_info_t)&info, &count);
         if (kr != KERN_SUCCESS) return false;
-        if (address > (mach_vm_address_t)addr) return false;
+        if (address > curr) return false;
         if (!(info.protection & VM_PROT_READ)) return false;
         address += vmsize;
     }
